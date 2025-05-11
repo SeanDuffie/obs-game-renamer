@@ -44,10 +44,10 @@ def get_running_steam_game():
 
                 return game_id, game_name
             else:
-                return None
+                return None, None
         except FileNotFoundError:
             print("FileNotFoundError")
-            return None
+            return None, None
     elif sys.platform == 'linux' or sys.platform == 'linux2':
         try:
             with open(os.path.expanduser("~/.steam/registry.vdf"), 'r', encoding="utf-8") as f:
