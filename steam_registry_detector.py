@@ -54,13 +54,13 @@ def get_running_steam_game():
                 content = f.read()
                 match = re.search(r'"RunningAppID"\s+"(\d+)"', content)
                 if match:
-                    return match.group(1)
+                    return match.group(1), "TODO"
                 else:
-                    return None
+                    return None, None
         except FileNotFoundError:
-            return None
+            return None, None
     else:
-        return None
+        return None, None
 
 if __name__ == "__main__":
     running_game_id, running_game_name = get_running_steam_game()
