@@ -8,6 +8,7 @@
 import os
 import os.path
 import urllib.request
+import time
 
 import obspython as OBS  # pylint: disable=import-error
 
@@ -119,11 +120,19 @@ def on_event(event):
     Args:
         event (_type_): _description_
     """
-    if event == OBS.OBS_FRONTEND_EVENT_RECORDING_STOPPED:
+    if event == OBS.OBS_FRONTEND_EVENT_RECORDING_STOPPED:# Get most recent filepath and parse it.
         path = OBS.obs_frontend_get_last_recording()
         dirname = os.path.dirname(path)
         raw_file = os.path.basename(path)
         root_ext = os.path.splitext(raw_file)
+
+        # Wait until the file is remuxed.
+        old_mp4 = os.path.join(dirname, root_ext[0] + ".mp4")
+        while not os.path.exists(old_mp4):
+            print("Waiting on remux...")
+            time.sleep(5)
+        # Remove the original MKV. TODO: Should there be better checks here?
+        os.remove(path)
         title = "_"
         if Data.Debug is True:
             print("DEBUG: Recording session STOPPED...")
@@ -142,18 +151,26 @@ def on_event(event):
             if Data.Debug is True:
                 print("DEBUG: The Rename mode you selected has not been implemented yet.")
 
-        new_file = root_ext[0] + "_" + title + root_ext[1]
+        new_title = root_ext[0] + "_" + title + ".mp4"
+        new_mp4 = os.path.join(dirname, new_title)
 
-        old_path = os.path.join(dirname, raw_file)
-        new_path = os.path.join(dirname, new_file)
-        rename_files(old_path,new_path)
+        rename_files(old_mp4,new_mp4)
+        # os.remove(old_mp4)
 
     if event == OBS.OBS_FRONTEND_EVENT_REPLAY_BUFFER_SAVED:
         if Data.Replay_True is True:
-            path = OBS.obs_frontend_get_last_replay()
+            path = OBS.obs_frontend_get_last_recording()
             dirname = os.path.dirname(path)
             raw_file = os.path.basename(path)
             root_ext = os.path.splitext(raw_file)
+
+            # Wait until the file is remuxed.
+            old_mp4 = os.path.join(dirname, root_ext[0] + ".mp4")
+            while not os.path.exists(old_mp4):
+                print("Waiting on remux...")
+                time.sleep(5)
+            # Remove the original MKV. TODO: Should there be better checks here?
+            os.remove(path)
             if Data.Debug is True:
                 print("DEBUG: Replay Buffer SAVED")
                 print("DEBUG: TEST. Original filename: \"" + path + "\"")
@@ -171,13 +188,11 @@ def on_event(event):
                 if Data.Debug is True:
                     print("DEBUG: The Rename mode you selected has not been implemented yet.")
 
-            new_file = root_ext[0] + title + root_ext[1]
+            new_title = root_ext[0] + "_" + title + ".mp4"
+            new_mp4 = os.path.join(dirname, new_title)
 
-            file = root_ext[0] + root_ext[1]
-            old_path = os.path.join(dirname, file)
-            new_path = os.path.join(dirname,new_file)
-
-            rename_files(old_path,new_path)
+            rename_files(old_mp4,new_mp4)
+            # os.remove(old_mp4)
 
         else:
             if Data.Debug is True:
