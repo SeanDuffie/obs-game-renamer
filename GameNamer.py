@@ -7,11 +7,11 @@
 """
 import os
 import os.path
-import urllib.request
+import threading
 import time
+import urllib.request
 
 import obspython as OBS  # pylint: disable=import-error
-
 from steam_registry_detector import get_running_steam_game
 
 # import pywinctl as pwc
@@ -33,7 +33,7 @@ class Data:
 #     Args:
 #         message (str): the message to be debugged.
 #     """
-#     if Data.Debug is True:
+#     if Data.Debug:
 #         print(message)
 
 def clean_filename(sourcestring: str,  removestring: str="\`/<>\:\"\\|?*"):
@@ -57,15 +57,15 @@ def rename_files(old_path, new_path):
         old_path (str): Vanilla file name suggested.
         new_path (str): Modified Output File Name.
     """
-    if Data.Debug is True:
+    if Data.Debug:
         print("DEBUG: Renaming files")
 
     try:
-        if Data.Debug is True:
+        if Data.Debug:
             print("DEBUG: Old file path - " + old_path)
             print("DEBUG: New file path - " + new_path)
         os.rename(old_path, new_path)
-        if Data.Debug is True:
+        if Data.Debug:
             print("DEBUG: Recording renamed.")
     except OSError as e:
         print(f"ERROR: {e}")
@@ -76,10 +76,10 @@ def get_foreground_window():
     Returns:
         str: Foreground window name
     """
-    window_name = "_TEMP"
+    window_name = "TEMP"
     # window_name = "_" + pwc.getActiveWindowTitle()
     window_name = clean_filename(window_name)
-    if Data.Debug is True:
+    if Data.Debug:
         print("DEBUG: Current Foreground Window: \"" + window_name + "\"")
     return window_name
 
@@ -89,10 +89,13 @@ def get_steam_game():
     Returns:
         str: Steam game name
     """
-    game_name = "_" + str(get_running_steam_game()[1])
+    game_name = str(get_running_steam_game()[1])
     game_name = clean_filename(game_name)
-    if Data.Debug is True:
+    # if "None" in game_name:
+    #     game_name = "Non-Steam"
+    if Data.Debug:
         print("DEBUG: Current Steam Game: \"", game_name, "\"")
+
     return game_name
 
 def get_twitch_title():
@@ -105,14 +108,80 @@ def get_twitch_title():
         "https://decapi.me/twitch/title/" + str(Data.ChannelName)).read().decode("utf-8")
     twitch_game = urllib.request.urlopen(
         "https://decapi.me/twitch/game/" + str(Data.ChannelName)).read().decode("utf-8")
-    title = "_VOD_" + Data.ChannelName + "_" + str(twitch_game) + "_" + str(twitch_streamtitle)
+    title = "VOD_" + Data.ChannelName + "_" + str(twitch_game) + "_" + str(twitch_streamtitle)
     title = clean_filename(title)
-    if Data.Debug is True:
+    if Data.Debug:
         print("DEBUG: Twitch Mode: Channel - " + Data.ChannelName)
         print("DEBUG: Twitch Mode: Game - " + str(twitch_game.decode("utf-8")))
         print("DEBUG: Twitch Mode: Stream Title - " + str(twitch_streamtitle.decode("utf-8")))
         print("DEBUG: Title Addition - \"" + title + "\"")
     return title
+
+def rename() -> None:
+    """ Get most recent recording and handle the renaming process.
+
+        - First, get the name of the most recent recording and parse it.
+        - Then, wait for the remux to finish.
+        - Delete the ".mkv" file.
+        - Get the title of the desired application.
+        - Finally, rename the ".mp4" file.
+
+        All of this should be done on a separate thread to not block the main process.
+        FIXME: Will this leave hanging threads if something is interrupted?
+    """
+    # Get and parse the most recent recording name.
+    path = OBS.obs_frontend_get_last_recording()
+    dirname = os.path.dirname(path)
+    raw_file = os.path.basename(path)
+    root_ext = os.path.splitext(raw_file)
+
+    # Wait for the ".mp4" file to be created. (This doesn't mean the remux is finished).
+    old_mp4 = os.path.join(dirname, root_ext[0] + ".mp4")
+    check = 500
+    while not os.path.exists(old_mp4):
+        if not check:
+            print("Error: The process hung for too long. Maybe the video was long?")
+            break
+        check -= 1
+
+        if Data.Debug and check % 100 == 0:
+            print("Waiting on remux...\tRemux: " + old_mp4 + "\tOriginal: " + path + "\n")
+
+        time.sleep(.1)
+
+    # Remove the original MKV. If a permission error occurs then the file is still being remuxxed.
+    while os.path.exists(path):
+        try:
+            os.remove(path)
+        except PermissionError:
+            print("Waiting for the remux to finish...")
+            time.sleep(.1)
+
+    # Generate new title.
+    title = "_"
+    if Data.Debug:
+        print("DEBUG: Recording session STOPPED...")
+
+    if Data.RenameMode == 0:
+        title += get_steam_game()
+
+    elif Data.RenameMode == 1:
+        title += get_twitch_title()
+
+    elif Data.RenameMode == 2:
+        title += get_foreground_window()
+
+    else:
+        title = ""
+        if Data.Debug:
+            print("DEBUG: The Rename mode you selected has not been implemented yet.")
+
+    new_title = root_ext[0] + title + ".mp4"
+    new_mp4 = os.path.join(dirname, new_title)
+
+    # Rename the actual file.
+    rename_files(old_mp4,new_mp4)
+    # os.remove(old_mp4)
 
 def on_event(event):
     """ 
@@ -120,86 +189,20 @@ def on_event(event):
     Args:
         event (_type_): _description_
     """
-    if event == OBS.OBS_FRONTEND_EVENT_RECORDING_STOPPED:# Get most recent filepath and parse it.
-        path = OBS.obs_frontend_get_last_recording()
-        dirname = os.path.dirname(path)
-        raw_file = os.path.basename(path)
-        root_ext = os.path.splitext(raw_file)
-
-        # Wait until the file is remuxed.
-        old_mp4 = os.path.join(dirname, root_ext[0] + ".mp4")
-        while not os.path.exists(old_mp4):
-            print("Waiting on remux...")
-            time.sleep(5)
-        # Remove the original MKV. TODO: Should there be better checks here?
-        os.remove(path)
-        title = "_"
-        if Data.Debug is True:
-            print("DEBUG: Recording session STOPPED...")
-
-        if Data.RenameMode == 0:
-            title += get_steam_game()
-
-        elif Data.RenameMode == 1:
-            title += get_twitch_title()
-
-        elif Data.RenameMode == 2:
-            title += get_foreground_window()
-
-        else:
-            title = ""
-            if Data.Debug is True:
-                print("DEBUG: The Rename mode you selected has not been implemented yet.")
-
-        new_title = root_ext[0] + "_" + title + ".mp4"
-        new_mp4 = os.path.join(dirname, new_title)
-
-        rename_files(old_mp4,new_mp4)
-        # os.remove(old_mp4)
+    if event == OBS.OBS_FRONTEND_EVENT_RECORDING_STOPPED:
+        thread = threading.Thread(target=rename, name="OBSRenamer")
+        thread.start()
+        if Data.Debug:
+            print("Rename thread started!")
 
     if event == OBS.OBS_FRONTEND_EVENT_REPLAY_BUFFER_SAVED:
-        if Data.Replay_True is True:
-            path = OBS.obs_frontend_get_last_recording()
-            dirname = os.path.dirname(path)
-            raw_file = os.path.basename(path)
-            root_ext = os.path.splitext(raw_file)
-
-            # Wait until the file is remuxed.
-            old_mp4 = os.path.join(dirname, root_ext[0] + ".mp4")
-            while not os.path.exists(old_mp4):
-                print("Waiting on remux...")
-                time.sleep(5)
-            # Remove the original MKV. TODO: Should there be better checks here?
-            os.remove(path)
-            if Data.Debug is True:
-                print("DEBUG: Replay Buffer SAVED")
-                print("DEBUG: TEST. Original filename: \"" + path + "\"")
-
-            if Data.RenameMode == 0:
-                title = get_steam_game()
-
-            elif Data.RenameMode == 1:
-                title = get_twitch_title()
-
-            elif Data.RenameMode == 2:
-                title = get_foreground_window()
-
-            else:
-                if Data.Debug is True:
-                    print("DEBUG: The Rename mode you selected has not been implemented yet.")
-
-            new_title = root_ext[0] + "_" + title + ".mp4"
-            new_mp4 = os.path.join(dirname, new_title)
-
-            rename_files(old_mp4,new_mp4)
-            # os.remove(old_mp4)
-
-        else:
-            if Data.Debug is True:
-                print("DEBUG: Replay buffer SAVED but we are not renaming replays. Skipping...")
+        thread = threading.Thread(target=rename)
+        thread.start()
+        if Data.Debug:
+            print("Rename thread started!")
 
     # if event == OBS.OBS_FRONTEND_EVENT_RECORDING_STARTED:
-    #     if Data.Debug is True:
+    #     if Data.Debug:
     #         print("DEBUG: Recording session started...")
     #     print("Triggered when the recording started. Window log cleaned and started.")
     #     with open(OBS.script_path()+'/WindowLog.txt', encoding='utf_8') as winlist:
@@ -210,11 +213,11 @@ def on_event(event):
     #             print("DEBUG: No WindowLog.txt file found. Ignoring.")
 
     # if event == OBS.OBS_FRONTEND_EVENT_REPLAY_BUFFER_STARTED:
-    #     if Data.Debug is True:
+    #     if Data.Debug:
     #         print("DEBUG: Replay Buffer Started")
 
     # if event == OBS.OBS_FRONTEND_EVENT_REPLAY_BUFFER_STOPPED:
-    #     if Data.Debug is True:
+    #     if Data.Debug:
     #         print("DEBUG: Replay Buffer Stopped")
 
 
@@ -286,7 +289,7 @@ def script_update(settings):
     Data.RenameMode = OBS.obs_data_get_int(settings,"mode")
     Data.ChannelName = OBS.obs_data_get_string(settings, "twitch_channel")
 
-    if Data.Debug is True:
+    if Data.Debug:
         print("DEBUG: Script updating...")
         print("DEBUG: Interval - " + str(Data.Delay))
         print("DEBUG: Debug - " + str(Data.Debug))
@@ -307,7 +310,7 @@ def script_update(settings):
         print("DEBUG: Rename Replays - " + str(Data.Replay_True))
 
     if Data.Delay != Data.DelayOld:
-        if Data.Debug is True:
+        if Data.Debug:
             print("DEBUG: Time interval changed. Restarting timer_process.")
 
         # OBS.timer_remove(timer_process)
